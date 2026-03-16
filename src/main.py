@@ -11,9 +11,10 @@ app = FastAPI()
 async def handle_echo_webhook(request: Request):
     payload = await request.json()
     if "commits" in payload:
-        repository = payload["repository"]["full_name"]
+        repository = payload["repository"]["full_name"].replace('_', '\\_')
         for commit in payload["commits"]:
             author = commit["author"]["name"]
+            username = commit["author"]["username"]
             message = commit["message"]
             url = commit["url"]
             
@@ -21,6 +22,7 @@ async def handle_echo_webhook(request: Request):
                 f"🚀 **Novo Commit em {repository}**\n\n"
                 f"📝 {message}\n"
                 f"👤 Autor: {author}\n"
+                f"Username: {username}\n"
                 f"🔗 [Ver no GitHub]({url})"
             )
             

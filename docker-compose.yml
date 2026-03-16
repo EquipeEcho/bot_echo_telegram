@@ -1,0 +1,25 @@
+services:
+  fastapi:
+    image: ${IMAGE_NAME:-bot_test}:${IMAGE_VERSION:-latest}
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file: .env
+    container_name: bot_echo
+    restart: unless-stopped
+    networks:
+      - bot_network
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: echo_bot_cloudflared
+    restart: unless-stopped
+    depends_on:
+      - fastapi
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARED_TOKEN}
+    networks:
+      - bot_network
+
+networks:
+  bot_network:
+    driver: bridge

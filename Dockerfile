@@ -1,19 +1,33 @@
-FROM python:3.13-slim
+FROM python:3.13-slim AS builder
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    UV_COMPILE_BYTECODE=1
 
 WORKDIR /app
 
-COPY requirements.txt .
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=bind,source=uv.lock,target=uv.lock \
+    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
+    uv sync --frozen --no-install-project --no-dev
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential && rm -rf /var/lib/apt/lists/* \
-    && pip install --no-cache-dir -r requirements.txt \
-    && apt-get purge -y --auto-remove build-essential \
-    && rm -rf /var/lib/apt/lists/*
+FROM python:3.13-slim AS runtime
 
-COPY ./src .
+RUN useradd --create-home --shell /bin/bash app
 
-RUN useradd -m appuser && chown -R appuser:appuser /app
+WORKDIR /app
 
-USER appuser
+ENV PATH="/app/.venv/bin:$PATH" \
+    PYTHONPATH="/app"
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+COPY --from=builder /app/.venv /app/.venv
+
+COPY --chown=app:app ./src/main.py ./
+
+USER app
+
+EXPOSE 8082
+
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8082"]

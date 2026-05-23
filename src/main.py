@@ -1,6 +1,8 @@
 import os
 import httpx
 from fastapi import FastAPI, Request
+from dotenv import load_dotenv
+load_dotenv()
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 GROUP_ID = os.getenv("GROUP_ID")
@@ -30,6 +32,33 @@ async def handle_echo_webhook(request: Request):
             
     return {"status": "success"}
 
+# Cria a função  para a notificação dos eventos do Jira
+@app.post("/jira-webhook")
+async def jira_webhook(request: Request):
+    data = await request.json()
+
+    issue = data.get("issue", {})
+    fields = issue.get("fields", {})
+
+    titulo = fields.get("summary", "Sem título")
+    status = fields.get("status", {}).get("name", "Sem status")
+    responsavel = fields.get("assignee", {}).get("displayName", "Não atribuído")
+    chave = issue.get("key", "")
+
+    mensagem = (
+        f"📌 Novo evento no Jira\n\n"
+        f"🔑 {chave}\n"
+        f"📄 {titulo}\n"
+        f"📊 Status: {status}\n"
+        f"👤 Responsável: {responsavel}"
+    )
+
+    print(mensagem)
+
+    await send_telegram_message(mensagem)
+
+    return {"status": "ok"}
+
 async def send_telegram_message(text: str, token=TELEGRAM_TOKEN, group_id=GROUP_ID):
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     async with httpx.AsyncClient() as client:
@@ -38,4 +67,8 @@ async def send_telegram_message(text: str, token=TELEGRAM_TOKEN, group_id=GROUP_
             "text": text,
             "parse_mode": "Markdown"
         })
+
+        print("Status Telegram:", response.status_code)
+        print("Resposta Telegram:", response.text)
+
         return response

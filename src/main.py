@@ -1,23 +1,40 @@
-import os
 import httpx
-from fastapi import FastAPI, Request
+import logging
+from fastapi import FastAPI, Request, HTTPException
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-GROUP_ID = os.getenv("GROUP_ID")
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+class Settings(BaseSettings):
+    telegram_token: str
+    group_id: str
+
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+try:
+    settings = Settings()
+except Exception as e:
+    logger.error(f"Missing required environment variables: {e}")
+    raise
 
 app = FastAPI()
 
 @app.post("/echo_webhook")
 async def handle_echo_webhook(request: Request):
-    payload = await request.json()
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+
     if "commits" in payload:
-        repository = payload["repository"]["full_name"].replace('_', '\\_')
-        for commit in payload["commits"]:
-            author = commit["author"]["name"]
-            username = commit["author"]["username"]
-            message = commit["message"]
-            url = commit["url"]
-            
+        repository = payload.get("repository", {}).get("full_name", "unknown").replace('_', '\\_')
+        for commit in payload.get("commits", []):
+            author = commit.get("author", {}).get("name", "Unknown")
+            username = commit.get("author", {}).get("username", "Unknown")
+            message = commit.get("message", "No message")
+            url = commit.get("url", "#")
+
             text = (
                 f"🚀 **Novo Commit em {repository}**\n\n"
                 f"📝 {message}\n"
@@ -25,17 +42,22 @@ async def handle_echo_webhook(request: Request):
                 f"Username: {username}\n"
                 f"🔗 [Ver no GitHub]({url})"
             )
-            
+
             await send_telegram_message(text)
-            
+
     return {"status": "success"}
 
-async def send_telegram_message(text: str, token=TELEGRAM_TOKEN, group_id=GROUP_ID):
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
-    async with httpx.AsyncClient() as client:
-        response = await client.post(url, json={
-            "chat_id": group_id,
-            "text": text,
-            "parse_mode": "Markdown"
-        })
-        return response
+async def send_telegram_message(text: str):
+    url = f"https://api.telegram.org/bot{settings.telegram_token}/sendMessage"
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(url, json={
+                "chat_id": settings.group_id,
+                "text": text,
+                "parse_mode": "Markdown"
+            })
+            response.raise_for_status()
+            return response
+    except httpx.HTTPError as e:
+        logger.error(f"Failed to send telegram message: {e}")
+        return None

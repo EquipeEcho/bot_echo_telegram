@@ -1,6 +1,7 @@
 services:
   fastapi:
     build: .
+    user: "0:0"
     restart: always
     container_name: bot_echo
     ports:

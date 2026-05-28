@@ -1,10 +1,13 @@
 import httpx
-from fastapi import FastAPI, Request
-from dotenv import load_dotenv
-load_dotenv()
+from fastapi import FastAPI, Request, HTTPException
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from loguru import logger
+import sys
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Configure Loguru
+logger.remove()
+logger.add(sys.stderr, level="INFO")
+logger.add("logs/app.log", rotation="10 MB", level="DEBUG")
 
 class Settings(BaseSettings):
     telegram_token: str
@@ -15,16 +18,21 @@ class Settings(BaseSettings):
 try:
     settings = Settings()
 except Exception as e:
-    logger.error(f"Missing required environment variables: {e}")
-    raise
+    logger.critical(f"Missing required environment variables: {e}")
+    sys.exit(1)
 
 app = FastAPI()
+
+@app.get("/")
+async def health_check():
+    return {"status": "ok"}
 
 @app.post("/echo_webhook")
 async def handle_echo_webhook(request: Request):
     try:
         payload = await request.json()
-    except Exception:
+    except Exception as e:
+        logger.error(f"Invalid JSON received: {e}")
         raise HTTPException(status_code=400, detail="Invalid JSON")
 
     if "commits" in payload:
@@ -47,43 +55,42 @@ async def handle_echo_webhook(request: Request):
 
     return {"status": "success"}
 
-# Cria a função  para a notificação dos eventos do Jira
 @app.post("/jira-webhook")
 async def jira_webhook(request: Request):
-    data = await request.json()
+    try:
+        data = await request.json()
+        issue = data.get("issue", {})
+        fields = issue.get("fields", {})
 
-    issue = data.get("issue", {})
-    fields = issue.get("fields", {})
+        titulo = fields.get("summary", "Sem título")
+        status = fields.get("status", {}).get("name", "Sem status")
+        responsavel = fields.get("assignee", {}).get("displayName", "Não atribuído")
+        chave = issue.get("key", "")
 
-    titulo = fields.get("summary", "Sem título")
-    status = fields.get("status", {}).get("name", "Sem status")
-    responsavel = fields.get("assignee", {}).get("displayName", "Não atribuído")
-    chave = issue.get("key", "")
+        mensagem = (
+            f"📌 Novo evento no Jira\n\n"
+            f"🔑 {chave}\n"
+            f"📄 {titulo}\n"
+            f"📊 Status: {status}\n"
+            f"👤 Responsável: {responsavel}"
+        )
 
-    mensagem = (
-        f"📌 Novo evento no Jira\n\n"
-        f"🔑 {chave}\n"
-        f"📄 {titulo}\n"
-        f"📊 Status: {status}\n"
-        f"👤 Responsável: {responsavel}"
-    )
+        await send_telegram_message(mensagem)
+        return {"status": "ok"}
+    except Exception as e:
+        logger.error(f"Error processing Jira webhook: {e}")
+        raise HTTPException(status_code=500, detail="Internal Error")
 
-    print(mensagem)
-
-    await send_telegram_message(mensagem)
-
-    return {"status": "ok"}
-
-async def send_telegram_message(text: str, token=TELEGRAM_TOKEN, group_id=GROUP_ID):
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
+async def send_telegram_message(text: str):
+    url = f"https://api.telegram.org/bot{settings.telegram_token}/sendMessage"
     async with httpx.AsyncClient() as client:
-        response = await client.post(url, json={
-            "chat_id": group_id,
-            "text": text,
-            "parse_mode": "Markdown"
-        })
-
-        print("Status Telegram:", response.status_code)
-        print("Resposta Telegram:", response.text)
-
-        return response
+        try:
+            response = await client.post(url, json={
+                "chat_id": settings.group_id,
+                "text": text,
+                "parse_mode": "Markdown"
+            })
+            response.raise_for_status()
+            logger.info(f"Telegram message sent: {response.status_code}")
+        except Exception as e:
+            logger.error(f"Failed to send Telegram message: {e}")

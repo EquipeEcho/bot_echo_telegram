@@ -1,25 +1,23 @@
 services:
   fastapi:
-    image: ${IMAGE_NAME:-bot_test}:${IMAGE_VERSION:-latest}
-    build:
-      context: .
-      dockerfile: Dockerfile
-    dns:
-      - 8.8.8.8
-      - 1.1.1.1
-    env_file: .env
+    build: .
+    restart: always
     container_name: bot_echo
-    restart: unless-stopped
+    ports:
+      - "8082:8082"
+    volumes:
+      - ./logs:/app/logs
+    env_file: .env
     networks:
       - bot_network
 
   cloudflared:
     image: cloudflare/cloudflared:latest
     container_name: echo_bot_cloudflared
-    restart: unless-stopped
+    restart: always
     depends_on:
       - fastapi
-    command: tunnel --no-autoupdate run --token ${CLOUDFLARED_TOKEN}
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARED_TOKEN:-""}
     networks:
       - bot_network
 

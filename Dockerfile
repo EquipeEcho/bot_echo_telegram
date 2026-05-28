@@ -8,9 +8,9 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
+# Ensure dependencies are installed
+COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
-    --mount=type=bind,source=uv.lock,target=uv.lock \
-    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
     uv sync --frozen --no-install-project --no-dev
 
 FROM python:3.13-slim AS runtime
@@ -23,11 +23,13 @@ ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONPATH="/app"
 
 COPY --from=builder /app/.venv /app/.venv
-
-COPY --chown=app:app ./src/main.py ./
+COPY --chown=app:app ./src /app/src
 
 USER app
 
 EXPOSE 8082
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8082"]
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8082/ || exit 1
+
+CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8082"]
